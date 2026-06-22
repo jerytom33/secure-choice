@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-sans), sans-serif;
+  --font-display: var(--font-display), sans-serif;
+  
+  --color-brand-orange: #f37021;
+  --color-brand-pink: #ed008c;
+  --color-brand-gold: #fdb833;
+  --color-brand-dark: #0b0a0a;
+  --color-brand-peach: #ffd699;
+}
+
+:root {
+  --background: #0b0a0a;
+  --foreground: #ffffff;
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-outfit);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+}
+
+/* Custom background glow effects */
+.bg-glow-container {
+  position: relative;
+  overflow: hidden;
+}
+
+.glow-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(100px);
+  opacity: 0.15;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.glow-orb-primary {
+  background: radial-gradient(circle, #f37021 0%, transparent 70%);
+}
+
+.glow-orb-secondary {
+  background: radial-gradient(circle, #ed008c 0%, transparent 70%);
+}
+
+/* Sunset gradient helper */
+.sunset-gradient {
+  background: linear-gradient(135deg, #f37021 0%, #ed008c 100%);
+}
+
+.sunset-text {
+  background: linear-gradient(135deg, #f7931e 0%, #ed008c 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Custom hide scrollbar */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
