@@ -1,0 +1,11 @@
+{
+  "version": "0.1.0",
+  "name": "secure-choice",
+  "dependencies": {
+    "next": {
+      "version": "16.2.9",
+      "overridden": false
+    }
+  }
+}
+

@@ -3,7 +3,7 @@
 import React from 'react';
 
 export default function WhatsAppButton() {
-  const whatsappUrl = 'https://wa.me/8953824852?text=Hi%20Secure%20Choice,%20I%20would%20like%20to%20inquire%20about%20your%20insurance%20services.';
+  const whatsappUrl = 'https://wa.me/+918953824852?text=Hi%20Secure%20Choice,%20I%20would%20like%20to%20inquire%20about%20your%20insurance%20services.';
 
   return (
     <a

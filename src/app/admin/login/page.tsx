@@ -20,7 +20,8 @@ export default function AdminLogin() {
     });
   }, [router]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    console.debug('AdminLogin: handleSubmit invoked');
     e.preventDefault();
     if (!passcode.trim()) {
       setError('Please enter a passcode');

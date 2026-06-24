@@ -40,7 +40,8 @@ export default function LifeForm() {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    console.debug('LifeForm: handleSubmit invoked', formData);
     e.preventDefault();
     if (!validate()) return;
 

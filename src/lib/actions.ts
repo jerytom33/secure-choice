@@ -3,7 +3,9 @@
 import { cookies } from 'next/headers';
 import fs from 'fs';
 import path from 'path';
-import { supabase, isSupabaseConfigured } from './supabase';
+import prisma from './prisma';
+
+const isPrismaConfigured = Boolean(process.env.DATABASE_URL);
 
 // Helper for local mock database
 const MOCK_DB_PATH = path.join(process.cwd(), 'src', 'lib', 'mock_db.json');
@@ -13,6 +15,19 @@ interface MockDb {
   life: any[];
   general: any[];
   consultation: any[];
+}
+
+// Health lead type used for typed responses
+export interface HealthLead {
+  id: string;
+  name?: string;
+  contact?: string;
+  email?: string;
+  address?: string;
+  pincode?: string;
+  state?: string;
+  family_members?: { name: string; relation: string; dob: string }[];
+  created_at?: string;
 }
 
 function getMockDb(): MockDb {
@@ -49,8 +64,12 @@ function saveMockDb(db: MockDb) {
 
 // Admin passcode action
 export async function loginAdmin(passcode: string) {
-  const adminPass = process.env.ADMIN_PASSCODE || 'securechoice2026';
-  
+  let adminPass = process.env.ADMIN_PASSCODE;
+  if (!adminPass) {
+    console.warn('ADMIN_PASSCODE is not set. Using default insecure passcode for local/dev. Set ADMIN_PASSCODE in env for production.');
+    adminPass = 'securechoice2026';
+  }
+
   if (passcode === adminPass) {
     const cookieStore = await cookies();
     cookieStore.set('admin_session', 'authenticated', {
@@ -93,15 +112,12 @@ export async function submitHealthLead(data: {
     ...data,
     created_at: new Date().toISOString()
   };
-
-  if (isSupabaseConfigured && supabase) {
-    const { error } = await supabase
-      .from('HealthInsuranceLeads')
-      .insert([newLead]);
-
-    if (error) {
-      console.error('Supabase Error:', error);
-      return { success: false, error: error.message };
+  if (isPrismaConfigured) {
+    try {
+      await prisma.healthInsuranceLead.create({ data: { ...data, id: newLead.id, created_at: new Date() } });
+    } catch (err) {
+      console.error('Prisma Error:', err);
+      return { success: false, error: (err as Error).message };
     }
   } else {
     // Save to mock local database
@@ -128,15 +144,12 @@ export async function submitLifeLead(data: {
     ...data,
     created_at: new Date().toISOString()
   };
-
-  if (isSupabaseConfigured && supabase) {
-    const { error } = await supabase
-      .from('LifeInsuranceLeads')
-      .insert([newLead]);
-
-    if (error) {
-      console.error('Supabase Error:', error);
-      return { success: false, error: error.message };
+  if (isPrismaConfigured) {
+    try {
+      await prisma.lifeInsuranceLead.create({ data: { id: newLead.id, name: data.name, contact: data.contact, email: data.email, dob: data.dob ? new Date(data.dob) : undefined, profession: data.profession, annual_income: data.annual_income, existing_policies: data.existing_policies, created_at: new Date() } });
+    } catch (err) {
+      console.error('Prisma Error:', err);
+      return { success: false, error: (err as Error).message };
     }
   } else {
     const db = getMockDb();
@@ -162,15 +175,12 @@ export async function submitGeneralLead(data: {
     ...data,
     created_at: new Date().toISOString()
   };
-
-  if (isSupabaseConfigured && supabase) {
-    const { error } = await supabase
-      .from('GeneralInsuranceLeads')
-      .insert([newLead]);
-
-    if (error) {
-      console.error('Supabase Error:', error);
-      return { success: false, error: error.message };
+  if (isPrismaConfigured) {
+    try {
+      await prisma.generalInsuranceLead.create({ data: { id: newLead.id, name: data.name, contact: data.contact, email: data.email, address: data.address, pincode: data.pincode, state: data.state, insurance_type: data.insurance_type, created_at: new Date() } });
+    } catch (err) {
+      console.error('Prisma Error:', err);
+      return { success: false, error: (err as Error).message };
     }
   } else {
     const db = getMockDb();
@@ -195,15 +205,12 @@ export async function submitConsultationRequest(data: {
     status: 'Pending',
     created_at: new Date().toISOString()
   };
-
-  if (isSupabaseConfigured && supabase) {
-    const { error } = await supabase
-      .from('ConsultationRequests')
-      .insert([newRequest]);
-
-    if (error) {
-      console.error('Supabase Error:', error);
-      return { success: false, error: error.message };
+  if (isPrismaConfigured) {
+    try {
+      await prisma.consultationRequest.create({ data: { id: newRequest.id, name: data.name, email: data.email, phone: data.phone, preferred_date: data.preferred_date ? new Date(data.preferred_date) : undefined, message: data.message, status: 'Pending', created_at: new Date() } });
+    } catch (err) {
+      console.error('Prisma Error:', err);
+      return { success: false, error: (err as Error).message };
     }
   } else {
     const db = getMockDb();
@@ -220,28 +227,67 @@ export async function getLeads() {
   if (!isAuth) {
     throw new Error('Unauthorized');
   }
+  if (isPrismaConfigured) {
+    try {
+      const [health, life, general, consultation] = await Promise.all([
+        prisma.healthInsuranceLead.findMany({ orderBy: { created_at: 'desc' } }),
+        prisma.lifeInsuranceLead.findMany({ orderBy: { created_at: 'desc' } }),
+        prisma.generalInsuranceLead.findMany({ orderBy: { created_at: 'desc' } }),
+        prisma.consultationRequest.findMany({ orderBy: { created_at: 'desc' } })
+      ]);
 
-  if (isSupabaseConfigured && supabase) {
-    const [healthRes, lifeRes, generalRes, consultationRes] = await Promise.all([
-      supabase.from('HealthInsuranceLeads').select('*').order('created_at', { ascending: false }),
-      supabase.from('LifeInsuranceLeads').select('*').order('created_at', { ascending: false }),
-      supabase.from('GeneralInsuranceLeads').select('*').order('created_at', { ascending: false }),
-      supabase.from('ConsultationRequests').select('*').order('created_at', { ascending: false })
-    ]);
-
-    if (healthRes.error || lifeRes.error || generalRes.error || consultationRes.error) {
-      console.error('Error fetching leads from Supabase');
-      // If error occurs or DB is empty/unmigrated, fall back to mock db
+      return {
+        health: health.map((h) => ({ ...h, created_at: h.created_at?.toISOString() })),
+        life: life.map((l) => ({ ...l, created_at: l.created_at?.toISOString(), dob: l.dob?.toISOString() })),
+        general: general.map((g) => ({ ...g, created_at: g.created_at?.toISOString() })),
+        consultation: consultation.map((c) => ({ ...c, created_at: c.created_at?.toISOString(), preferred_date: c.preferred_date?.toISOString() }))
+      };
+    } catch (err) {
+      console.error('Prisma Error fetching leads:', err);
       return getMockDb();
     }
-
-    return {
-      health: healthRes.data || [],
-      life: lifeRes.data || [],
-      general: generalRes.data || [],
-      consultation: consultationRes.data || []
-    };
   } else {
     return getMockDb();
   }
+}
+
+// Fetch only health leads (admin-protected)
+export async function getHealthLeads(opts?: { page?: number; pageSize?: number; order?: 'asc' | 'desc' }) {
+  const isAuth = await checkAdminSession();
+  if (!isAuth) {
+    throw new Error('Unauthorized');
+  }
+
+  const page = Math.max(1, opts?.page ?? 1);
+  const pageSize = Math.max(1, opts?.pageSize ?? 20);
+  const orderDesc = opts?.order !== 'asc';
+  const offset = (page - 1) * pageSize;
+
+  if (isPrismaConfigured) {
+    try {
+      const [data, total] = await Promise.all([
+        prisma.healthInsuranceLead.findMany({
+          orderBy: { created_at: orderDesc ? 'desc' : 'asc' },
+          skip: offset,
+          take: pageSize
+        }),
+        prisma.healthInsuranceLead.count()
+      ]);
+
+      return { data, total, page, pageSize };
+    } catch (err) {
+      console.error('Prisma Error fetching health leads:', err);
+      const db = getMockDb();
+      const all = db.health as HealthLead[];
+      const total = all.length;
+      const paged = all.slice(offset, offset + pageSize);
+      return { data: paged, total, page, pageSize };
+    }
+  }
+
+  const db = getMockDb();
+  const all = db.health as HealthLead[];
+  const total = all.length;
+  const paged = all.slice(offset, offset + pageSize);
+  return { data: paged, total, page, pageSize };
 }

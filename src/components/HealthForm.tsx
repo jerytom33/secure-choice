@@ -88,7 +88,8 @@ export default function HealthForm() {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    console.debug('HealthForm: handleSubmit invoked', formData);
     e.preventDefault();
     if (!validate()) return;
 
