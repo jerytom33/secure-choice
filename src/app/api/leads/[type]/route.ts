@@ -139,7 +139,7 @@ export async function POST(
   if (isPrismaConfigured) {
     try {
       const model = getPrismaModel(type as LeadType);
-      const data: any = { id, ...body, status: type === 'consultation' ? 'Pending' : 'New', is_deleted: false, created_at: now };
+      const data: any = { id, ...body, status: type === 'consultation' ? 'Pending' : 'Pending', is_deleted: false, created_at: now };
       if (type === 'life' && body.dob) data.dob = new Date(body.dob);
       if (type === 'consultation' && body.preferred_date) data.preferred_date = new Date(body.preferred_date);
       await (model as any).create({ data });
@@ -152,7 +152,7 @@ export async function POST(
 
   // Mock DB
   const db = getMockDb();
-  const newEntry = { id, ...body, status: type === 'consultation' ? 'Pending' : 'New', is_deleted: false, created_at: now.toISOString(), updated_at: now.toISOString() };
+  const newEntry = { id, ...body, status: 'Pending', is_deleted: false, created_at: now.toISOString(), updated_at: now.toISOString() };
   db[type].push(newEntry);
   const dir = path.dirname(MOCK_DB_PATH);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });

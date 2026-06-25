@@ -13,8 +13,8 @@ const MOCK_DB_PATH = path.join(process.cwd(), 'src', 'lib', 'mock_db.json');
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type LeadType = 'health' | 'life' | 'general' | 'consultation';
-export type LeadStatus = 'New' | 'Contacted' | 'Follow-Up' | 'Converted' | 'Rejected';
-export type ConsultationStatus = 'Pending' | 'Scheduled' | 'Completed' | 'Cancelled';
+export type LeadStatus = 'Pending' | 'Processing' | 'Converted' | 'Rejected';
+export type ConsultationStatus = 'Pending' | 'Processing' | 'Converted' | 'Rejected';
 
 export interface PaginationOpts {
   page?: number;
@@ -178,7 +178,7 @@ export async function submitHealthLead(data: {
   if (isPrismaConfigured) {
     try {
       await prisma.healthInsuranceLead.create({
-        data: { id, ...sanitized, status: 'New', is_deleted: false, created_at: new Date() }
+        data: { id, ...sanitized, status: 'Pending', is_deleted: false, created_at: new Date() }
       });
     } catch (err) {
       console.error('Prisma Error:', err);
@@ -186,7 +186,7 @@ export async function submitHealthLead(data: {
     }
   } else {
     const db = getMockDb();
-    db.health.push({ id, ...sanitized, status: 'New', is_deleted: false, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    db.health.push({ id, ...sanitized, status: 'Pending', is_deleted: false, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
     saveMockDb(db);
   }
 
@@ -228,7 +228,7 @@ export async function submitLifeLead(data: {
           id,
           ...sanitized,
           dob: sanitized.dob ? new Date(sanitized.dob) : undefined,
-          status: 'New',
+          status: 'Pending',
           is_deleted: false,
           created_at: new Date()
         }
@@ -239,7 +239,7 @@ export async function submitLifeLead(data: {
     }
   } else {
     const db = getMockDb();
-    db.life.push({ id, ...sanitized, status: 'New', is_deleted: false, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    db.life.push({ id, ...sanitized, status: 'Pending', is_deleted: false, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
     saveMockDb(db);
   }
 
@@ -278,7 +278,7 @@ export async function submitGeneralLead(data: {
   if (isPrismaConfigured) {
     try {
       await prisma.generalInsuranceLead.create({
-        data: { id, ...sanitized, status: 'New', is_deleted: false, created_at: new Date() }
+        data: { id, ...sanitized, status: 'Pending', is_deleted: false, created_at: new Date() }
       });
     } catch (err) {
       console.error('Prisma Error:', err);
@@ -286,7 +286,7 @@ export async function submitGeneralLead(data: {
     }
   } else {
     const db = getMockDb();
-    db.general.push({ id, ...sanitized, status: 'New', is_deleted: false, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    db.general.push({ id, ...sanitized, status: 'Pending', is_deleted: false, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
     saveMockDb(db);
   }
 
@@ -460,9 +460,7 @@ export async function updateLeadStatus(type: LeadType, id: string, status: strin
   if (!id || !status) return { success: false, error: 'Lead ID and status are required' };
 
   // Validate status values
-  const validLeadStatuses = ['New', 'Contacted', 'Follow-Up', 'Converted', 'Rejected'];
-  const validConsultationStatuses = ['Pending', 'Scheduled', 'Completed', 'Cancelled'];
-  const validStatuses = type === 'consultation' ? validConsultationStatuses : validLeadStatuses;
+  const validStatuses = ['Pending', 'Processing', 'Converted', 'Rejected'];
 
   if (!validStatuses.includes(status)) {
     return { success: false, error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` };

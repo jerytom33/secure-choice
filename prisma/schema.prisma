@@ -30,7 +30,7 @@ model HealthInsuranceLead {
   pincode        String?
   state          String?
   family_members Json?
-  status         String   @default("New")
+  status         String   @default("Pending")
   notes          String?
   is_deleted     Boolean  @default(false)
   created_at     DateTime @default(now())
@@ -46,7 +46,7 @@ model LifeInsuranceLead {
   profession        String?
   annual_income     String?
   existing_policies String?
-  status            String   @default("New")
+  status            String   @default("Pending")
   notes             String?
   is_deleted        Boolean  @default(false)
   created_at        DateTime @default(now())
@@ -62,7 +62,7 @@ model GeneralInsuranceLead {
   pincode        String?
   state          String?
   insurance_type String?
-  status         String   @default("New")
+  status         String   @default("Pending")
   notes          String?
   is_deleted     Boolean  @default(false)
   created_at     DateTime @default(now())

@@ -11,62 +11,56 @@ import {
   Search,
   Download,
   LogOut,
-  HelpCircle,
   Eye,
   ChevronDown,
   ChevronUp,
-  LayoutDashboard
+  LayoutDashboard,
+  Trash2,
+  StickyNote,
+  ArrowUpDown
 } from 'lucide-react';
-import { getLeads, logoutAdmin, checkAdminSession } from '@/lib/actions';
+import { getLeads, logoutAdmin, checkAdminSession, updateLeadStatus, updateLeadNotes, deleteLead } from '@/lib/actions';
+import type { LeadType } from '@/lib/actions';
+
+type Tab = 'overview' | 'health' | 'life' | 'general' | 'consultation';
+type SortField = 'created_at' | 'status' | 'name';
+type SortOrder = 'asc' | 'desc';
 
 export default function AdminDashboard() {
   const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
-
-  // Leads data
-  const [leads, setLeads] = useState<{
-    health: any[];
-    life: any[];
-    general: any[];
-    consultation: any[];
-  }>({
-    health: [],
-    life: [],
-    general: [],
-    consultation: []
-  });
-
-  const [activeTab, setActiveTab] = useState<'overview' | 'health' | 'life' | 'general' | 'consultation'>('overview');
+  const [leads, setLeads] = useState<{ health: any[]; life: any[]; general: any[]; consultation: any[] }>({ health: [], life: [], general: [], consultation: [] });
+  const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<string>('All');
+  const [sortField, setSortField] = useState<SortField>('created_at');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+  const [editingNotes, setEditingNotes] = useState<string | null>(null);
+  const [notesValue, setNotesValue] = useState('');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   useEffect(() => {
-    // Authenticate admin session
     checkAdminSession().then((isAuth) => {
       setIsAuthenticated(isAuth);
-      if (!isAuth) {
-        router.push('/admin/login');
-      } else {
-        // Fetch lead data
-        getLeads()
-          .then((data) => {
-            setLeads({
-              health: data.health || [],
-              life: data.life || [],
-              general: data.general || [],
-              consultation: data.consultation || []
-            });
-          })
-          .catch((err) => {
-            console.error('Error fetching leads:', err);
-          })
-          .finally(() => {
-            setIsLoading(false);
-          });
-      }
+      if (!isAuth) { router.push('/admin/login'); }
+      else { fetchLeads(); }
     });
   }, [router]);
+
+  const fetchLeads = async () => {
+    try {
+      const data = await getLeads();
+      setLeads({ health: data.health || [], life: data.life || [], general: data.general || [], consultation: data.consultation || [] });
+    } catch (err) { console.error('Error fetching leads:', err); }
+    finally { setIsLoading(false); }
+  };
 
   if (isAuthenticated === null || isAuthenticated === false) {
     return (
@@ -79,176 +73,307 @@ export default function AdminDashboard() {
     );
   }
 
-  const handleLogout = async () => {
-    await logoutAdmin();
-    router.push('/admin/login');
+  const handleLogout = async () => { await logoutAdmin(); router.push('/admin/login'); };
+  const toggleRow = (id: string) => setExpandedRows((prev) => ({ ...prev, [id]: !prev[id] }));
+
+  // ─── CRUD Handlers ──────────────────────────────────────────────────────────
+
+  const handleStatusChange = async (type: LeadType, id: string, newStatus: string) => {
+    const result = await updateLeadStatus(type, id, newStatus);
+    if (result.success) {
+      showToast(`Status updated to ${newStatus}`, 'success');
+      setLeads(prev => ({
+        ...prev,
+        [type]: prev[type].map((item: any) => item.id === id ? { ...item, status: newStatus } : item)
+      }));
+    } else {
+      showToast(result.error || 'Failed to update status', 'error');
+    }
   };
 
-  const toggleRow = (id: string) => {
-    setExpandedRows((prev) => ({ ...prev, [id]: !prev[id] }));
+  const handleDelete = async (type: LeadType, id: string) => {
+    if (!confirm('Are you sure you want to delete this lead? This action can be undone by an admin.')) return;
+    const result = await deleteLead(type, id);
+    if (result.success) {
+      showToast('Lead deleted successfully', 'success');
+      setLeads(prev => ({
+        ...prev,
+        [type]: prev[type].filter((item: any) => item.id !== id)
+      }));
+    } else {
+      showToast(result.error || 'Failed to delete', 'error');
+    }
   };
 
-  // CSV Exporter
+  const handleSaveNotes = async (type: LeadType, id: string) => {
+    const result = await updateLeadNotes(type, id, notesValue);
+    if (result.success) {
+      showToast('Notes saved', 'success');
+      setLeads(prev => ({
+        ...prev,
+        [type]: prev[type].map((item: any) => item.id === id ? { ...item, notes: notesValue } : item)
+      }));
+      setEditingNotes(null);
+    } else {
+      showToast(result.error || 'Failed to save notes', 'error');
+    }
+  };
+
+  // ─── CSV Export ──────────────────────────────────────────────────────────────
+
   const exportToCSV = (type: 'health' | 'life' | 'general' | 'consultation') => {
     const dataToExport = leads[type];
-    if (dataToExport.length === 0) {
-      alert('No data to export');
-      return;
-    }
-
+    if (dataToExport.length === 0) { showToast('No data to export', 'error'); return; }
     let csvContent = '';
-
     if (type === 'health') {
-      csvContent += 'ID,Name,Contact,Email,Address,Pincode,State,Family Members Count,Created At\n';
-      dataToExport.forEach((item) => {
-        const familyCount = Array.isArray(item.family_members) ? item.family_members.length : 0;
-        csvContent += `"${item.id}","${item.name}","${item.contact}","${item.email}","${item.address || ''}","${item.pincode || ''}","${item.state || ''}",${familyCount},"${item.created_at}"\n`;
-      });
+      csvContent += 'Name,Contact,Email,Address,State,Status,Members,Created At\n';
+      dataToExport.forEach((item: any) => { csvContent += `"${item.name}","${item.contact}","${item.email}","${item.address || ''}","${item.state || ''}","${item.status}",${Array.isArray(item.family_members) ? item.family_members.length : 0},"${item.created_at}"\n`; });
     } else if (type === 'life') {
-      csvContent += 'ID,Name,Contact,Email,DOB,Profession,Annual Income,Existing Policies,Created At\n';
-      dataToExport.forEach((item) => {
-        csvContent += `"${item.id}","${item.name}","${item.contact}","${item.email}","${item.dob || ''}","${item.profession || ''}","${item.annual_income || ''}","${item.existing_policies || ''}","${item.created_at}"\n`;
-      });
+      csvContent += 'Name,Contact,Email,DOB,Profession,Income,Status,Created At\n';
+      dataToExport.forEach((item: any) => { csvContent += `"${item.name}","${item.contact}","${item.email}","${item.dob || ''}","${item.profession || ''}","${item.annual_income || ''}","${item.status}","${item.created_at}"\n`; });
     } else if (type === 'general') {
-      csvContent += 'ID,Name,Contact,Email,Address,Pincode,State,Insurance Type,Created At\n';
-      dataToExport.forEach((item) => {
-        csvContent += `"${item.id}","${item.name}","${item.contact}","${item.email}","${item.address || ''}","${item.pincode || ''}","${item.state || ''}","${item.insurance_type}","${item.created_at}"\n`;
-      });
-    } else if (type === 'consultation') {
-      csvContent += 'ID,Name,Email,Phone,Preferred Date,Message,Status,Created At\n';
-      dataToExport.forEach((item) => {
-        csvContent += `"${item.id}","${item.name}","${item.email}","${item.phone}","${item.preferred_date || ''}","${item.message || ''}","${item.status}","${item.created_at}"\n`;
-      });
+      csvContent += 'Name,Contact,Email,Address,State,Insurance Type,Status,Created At\n';
+      dataToExport.forEach((item: any) => { csvContent += `"${item.name}","${item.contact}","${item.email}","${item.address || ''}","${item.state || ''}","${item.insurance_type}","${item.status}","${item.created_at}"\n`; });
+    } else {
+      csvContent += 'Name,Email,Phone,Preferred Date,Message,Status,Created At\n';
+      dataToExport.forEach((item: any) => { csvContent += `"${item.name}","${item.email}","${item.phone}","${item.preferred_date || ''}","${item.message || ''}","${item.status}","${item.created_at}"\n`; });
     }
-
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `${type}_leads_export_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    link.setAttribute('download', `${type}_leads_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
-  // Lead metrics calculations
+  // ─── Filtering & Sorting ─────────────────────────────────────────────────────
+
+  const getFilteredAndSorted = (list: any[]) => {
+    let filtered = list.filter((item: any) => {
+      const q = searchQuery.toLowerCase();
+      const matchesSearch = !q || (item.name || '').toLowerCase().includes(q) || (item.email || '').toLowerCase().includes(q) || (item.contact || item.phone || '').toLowerCase().includes(q);
+      const matchesStatus = statusFilter === 'All' || item.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+    filtered.sort((a: any, b: any) => {
+      let aVal = a[sortField] || '';
+      let bVal = b[sortField] || '';
+      if (sortField === 'created_at') { aVal = new Date(aVal).getTime(); bVal = new Date(bVal).getTime(); }
+      else { aVal = String(aVal).toLowerCase(); bVal = String(bVal).toLowerCase(); }
+      if (sortOrder === 'asc') return aVal > bVal ? 1 : -1;
+      return aVal < bVal ? 1 : -1;
+    });
+    return filtered;
+  };
+
+  const toggleSort = (field: SortField) => {
+    if (sortField === field) setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+    else { setSortField(field); setSortOrder('desc'); }
+  };
+
+  // ─── Metrics ─────────────────────────────────────────────────────────────────
+
   const totalHealth = leads.health.length;
   const totalLife = leads.life.length;
   const totalGeneral = leads.general.length;
   const totalConsultations = leads.consultation.length;
   const totalLeads = totalHealth + totalLife + totalGeneral + totalConsultations;
 
-  // Filter lists based on Search
-  const getFilteredList = (list: any[]) => {
-    return list.filter((item) => {
-      const name = (item.name || '').toLowerCase();
-      const email = (item.email || '').toLowerCase();
-      const contact = (item.contact || item.phone || '').toLowerCase();
-      const query = searchQuery.toLowerCase();
-      return name.includes(query) || email.includes(query) || contact.includes(query);
-    });
+  // ─── Status Badge Component ──────────────────────────────────────────────────
+
+  const StatusBadge = ({ status }: { status: string }) => {
+    const colors: Record<string, string> = {
+      'Pending': 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
+      'Processing': 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+      'Converted': 'bg-green-500/15 text-green-400 border-green-500/30',
+      'Rejected': 'bg-red-500/15 text-red-400 border-red-500/30',
+    };
+    return (
+      <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold border ${colors[status] || 'bg-gray-500/15 text-gray-400 border-gray-500/30'}`}>
+        {status}
+      </span>
+    );
   };
 
-  const filteredHealth = getFilteredList(leads.health);
-  const filteredLife = getFilteredList(leads.life);
-  const filteredGeneral = getFilteredList(leads.general);
-  const filteredConsultation = getFilteredList(leads.consultation);
+  // ─── Status Action Buttons ───────────────────────────────────────────────────
+
+  const StatusButtons = ({ type, id, currentStatus }: { type: LeadType; id: string; currentStatus: string }) => {
+    const statuses = ['Pending', 'Processing', 'Converted', 'Rejected'];
+    const btnColors: Record<string, string> = {
+      'Pending': 'hover:bg-yellow-500/20 text-yellow-400',
+      'Processing': 'hover:bg-blue-500/20 text-blue-400',
+      'Converted': 'hover:bg-green-500/20 text-green-400',
+      'Rejected': 'hover:bg-red-500/20 text-red-400',
+    };
+    return (
+      <div className="flex flex-wrap gap-1.5">
+        {statuses.map(s => (
+          <button
+            key={s}
+            disabled={currentStatus === s}
+            onClick={() => handleStatusChange(type, id, s)}
+            className={`px-3 py-1.5 rounded-full text-[10px] font-bold border border-white/10 transition-all active:scale-95 ${currentStatus === s ? 'bg-white/10 text-white cursor-default opacity-60' : btnColors[s] + ' hover:border-white/20'}`}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  // ─── Lead Table Row Component ────────────────────────────────────────────────
+
+  const LeadRow = ({ lead, type, columns }: { lead: any; type: LeadType; columns: { key: string; label: string }[] }) => (
+    <React.Fragment>
+      <tr className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+        <td className="p-3 text-center">
+          <button onClick={() => toggleRow(lead.id)} className="p-1 rounded-full hover:bg-white/10 text-gray-400 hover:text-white">
+            {expandedRows[lead.id] ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </button>
+        </td>
+        {columns.map(col => (
+          <td key={col.key} className="p-3 text-xs text-gray-300">
+            {col.key === 'status' ? <StatusBadge status={lead[col.key]} /> :
+             col.key === 'family_members' ? <span className="text-red-400 font-bold">{Array.isArray(lead[col.key]) ? lead[col.key].length : 0}</span> :
+             col.key === 'created_at' ? new Date(lead[col.key]).toLocaleDateString() :
+             <span className="font-semibold">{lead[col.key] || '—'}</span>}
+          </td>
+        ))}
+        <td className="p-3">
+          <button onClick={() => handleDelete(type, lead.id)} className="p-1.5 rounded-full hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-colors" title="Delete">
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </td>
+      </tr>
+
+      {/* Expanded Row with Status Buttons + Notes */}
+      {expandedRows[lead.id] && (
+        <tr className="bg-white/[0.01]">
+          <td colSpan={columns.length + 2} className="p-5 border-b border-white/5">
+            <div className="space-y-4">
+              {/* Status Actions */}
+              <div>
+                <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider block mb-2">Change Status</span>
+                <StatusButtons type={type} id={lead.id} currentStatus={lead.status} />
+              </div>
+
+              {/* Notes */}
+              <div>
+                <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider block mb-2">Admin Notes</span>
+                {editingNotes === lead.id ? (
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={notesValue}
+                      onChange={(e) => setNotesValue(e.target.value)}
+                      className="flex-1 rounded-full border border-white/10 bg-white/5 py-2 px-4 text-xs text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-brand-orange"
+                      placeholder="Add notes about this lead..."
+                    />
+                    <button onClick={() => handleSaveNotes(type, lead.id)} className="px-4 py-2 rounded-full bg-brand-orange text-white text-xs font-bold hover:opacity-90">Save</button>
+                    <button onClick={() => setEditingNotes(null)} className="px-4 py-2 rounded-full bg-white/5 border border-white/10 text-xs text-gray-400 hover:text-white">Cancel</button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <p className="text-xs text-gray-300 italic">{lead.notes || 'No notes added yet.'}</p>
+                    <button onClick={() => { setEditingNotes(lead.id); setNotesValue(lead.notes || ''); }} className="p-1.5 rounded-full hover:bg-white/10 text-gray-500 hover:text-white">
+                      <StickyNote className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Extra Details */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                {lead.address && <div><span className="text-gray-500 block text-[10px] uppercase font-bold">Address</span><span className="text-gray-200">{lead.address}, {lead.pincode}</span></div>}
+                {lead.dob && <div><span className="text-gray-500 block text-[10px] uppercase font-bold">DOB</span><span className="text-gray-200">{lead.dob}</span></div>}
+                {lead.profession && <div><span className="text-gray-500 block text-[10px] uppercase font-bold">Profession</span><span className="text-gray-200">{lead.profession}</span></div>}
+                {lead.annual_income && <div><span className="text-gray-500 block text-[10px] uppercase font-bold">Income</span><span className="text-gray-200">₹{lead.annual_income}</span></div>}
+                {lead.message && <div className="col-span-2"><span className="text-gray-500 block text-[10px] uppercase font-bold">Message</span><span className="text-gray-200">{lead.message}</span></div>}
+                <div><span className="text-gray-500 block text-[10px] uppercase font-bold">Lead ID</span><span className="text-gray-400 font-mono text-[10px]">{lead.id}</span></div>
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </React.Fragment>
+  );
+
+  // ─── Generic Table Component ─────────────────────────────────────────────────
+
+  const LeadTable = ({ type, columns }: { type: LeadType; columns: { key: string; label: string }[] }) => {
+    const filtered = getFilteredAndSorted(leads[type]);
+    return (
+      <div className="overflow-x-auto rounded-3xl bg-[#121212] border border-white/5">
+        <table className="w-full border-collapse text-left text-xs">
+          <thead>
+            <tr className="border-b border-white/5 bg-white/[0.02] select-none">
+              <th className="p-3 w-10" />
+              {columns.map(col => (
+                <th key={col.key} className="p-3 text-[10px] font-black text-gray-400 uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => toggleSort(col.key as SortField)}>
+                  <div className="flex items-center gap-1">
+                    {col.label}
+                    {sortField === col.key && <ArrowUpDown className="h-3 w-3 text-brand-orange" />}
+                  </div>
+                </th>
+              ))}
+              <th className="p-3 w-10" />
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length > 0 ? (
+              filtered.map((lead: any) => <LeadRow key={lead.id} lead={lead} type={type} columns={columns} />)
+            ) : (
+              <tr><td colSpan={columns.length + 2} className="p-12 text-center text-xs text-gray-500 italic">No leads match your filters</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
+  // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-brand-dark text-white flex flex-col">
-      {/* Header bar */}
-      <header className="border-b border-white/10 bg-[#0d0d0d] px-6 py-4 flex items-center justify-between sticky top-0 z-30">
-        <div className="flex items-center gap-3">
-          <img src=" " alt="Secure Choice" className="h-8 w-auto" />
-          <div>
-            <h1 className="text-lg font-extrabold tracking-wider font-display sunset-text uppercase leading-none">
-              Secure Choice
-            </h1>
-            <span className="text-[9px] font-black text-gray-500 uppercase tracking-widest mt-1 block">
-              Dashboard Control Panel
-            </span>
-          </div>
+      {/* Toast Notification */}
+      {toast && (
+        <div className={`fixed top-4 right-4 z-50 px-5 py-3 rounded-2xl text-xs font-bold shadow-xl border animate-fadeIn ${toast.type === 'success' ? 'bg-green-500/15 border-green-500/30 text-green-400' : 'bg-red-500/15 border-red-500/30 text-red-400'}`}>
+          {toast.message}
         </div>
+      )}
 
-        <div className="flex items-center gap-4">
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-xs font-bold border border-white/10 rounded-full px-4 py-2 text-gray-300 hover:text-white transition-all active:scale-95"
-          >
-            <LogOut className="h-3.5 w-3.5" />
-            Logout
-          </button>
+      {/* Header */}
+      <header className="border-b border-white/10 bg-[#0d0d0d] px-6 py-4 flex items-center justify-between sticky top-0 z-30">
+        <div>
+          <h1 className="text-lg font-extrabold tracking-wider font-display sunset-text uppercase leading-none">Secure Choice</h1>
+          <span className="text-[9px] font-black text-gray-500 uppercase tracking-widest mt-0.5 block">Admin Dashboard</span>
         </div>
+        <button onClick={handleLogout} className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-xs font-bold border border-white/10 rounded-full px-4 py-2 text-gray-300 hover:text-white transition-all active:scale-95">
+          <LogOut className="h-3.5 w-3.5" /> Logout
+        </button>
       </header>
 
-      {/* Main content grid */}
       <div className="flex-grow flex flex-col md:flex-row">
-
-        {/* Sidebar Navigation */}
-        <aside className="w-full md:w-64 bg-[#0a0a0a] border-r border-white/5 p-4 flex flex-col gap-2 shrink-0 text-left">
-          <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-3 mb-2 block">
-            Navigation
-          </span>
-
-          <button
-            onClick={() => setActiveTab('overview')}
-            className={`flex items-center gap-3 w-full px-4 py-3 rounded-2xl text-xs font-bold transition-all ${activeTab === 'overview'
-                ? 'bg-brand-orange/15 text-brand-orange border-l-4 border-brand-orange'
-                : 'hover:bg-white/5 text-gray-400 hover:text-white'
-              }`}
-          >
-            <LayoutDashboard className="h-4.5 w-4.5" />
-            Analytics Overview
-          </button>
-
-          <button
-            onClick={() => setActiveTab('health')}
-            className={`flex items-center gap-3 w-full px-4 py-3 rounded-2xl text-xs font-bold transition-all ${activeTab === 'health'
-                ? 'bg-brand-orange/15 text-brand-orange border-l-4 border-brand-orange'
-                : 'hover:bg-white/5 text-gray-400 hover:text-white'
-              }`}
-          >
-            <Heart className="h-4.5 w-4.5 text-red-500" />
-            Health Insurance ({totalHealth})
-          </button>
-
-          <button
-            onClick={() => setActiveTab('life')}
-            className={`flex items-center gap-3 w-full px-4 py-3 rounded-2xl text-xs font-bold transition-all ${activeTab === 'life'
-                ? 'bg-brand-orange/15 text-brand-orange border-l-4 border-brand-orange'
-                : 'hover:bg-white/5 text-gray-400 hover:text-white'
-              }`}
-          >
-            <ShieldAlert className="h-4.5 w-4.5 text-blue-500" />
-            Life Insurance ({totalLife})
-          </button>
-
-          <button
-            onClick={() => setActiveTab('general')}
-            className={`flex items-center gap-3 w-full px-4 py-3 rounded-2xl text-xs font-bold transition-all ${activeTab === 'general'
-                ? 'bg-brand-orange/15 text-brand-orange border-l-4 border-brand-orange'
-                : 'hover:bg-white/5 text-gray-400 hover:text-white'
-              }`}
-          >
-            <Car className="h-4.5 w-4.5 text-amber-500" />
-            General Insurance ({totalGeneral})
-          </button>
-
-          <button
-            onClick={() => setActiveTab('consultation')}
-            className={`flex items-center gap-3 w-full px-4 py-3 rounded-2xl text-xs font-bold transition-all ${activeTab === 'consultation'
-                ? 'bg-brand-orange/15 text-brand-orange border-l-4 border-brand-orange'
-                : 'hover:bg-white/5 text-gray-400 hover:text-white'
-              }`}
-          >
-            <CalendarRange className="h-4.5 w-4.5 text-emerald-500" />
-            Consultation Requests ({totalConsultations})
-          </button>
+        {/* Sidebar */}
+        <aside className="w-full md:w-56 bg-[#0a0a0a] border-r border-white/5 p-4 flex flex-col gap-1.5 shrink-0">
+          <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-3 mb-2 block">Navigation</span>
+          {([
+            { tab: 'overview', label: 'Overview', icon: LayoutDashboard, count: totalLeads, color: '' },
+            { tab: 'health', label: 'Health', icon: Heart, count: totalHealth, color: 'text-red-500' },
+            { tab: 'life', label: 'Life', icon: ShieldAlert, count: totalLife, color: 'text-blue-500' },
+            { tab: 'general', label: 'General', icon: Car, count: totalGeneral, color: 'text-amber-500' },
+            { tab: 'consultation', label: 'Consultation', icon: CalendarRange, count: totalConsultations, color: 'text-emerald-500' },
+          ] as const).map(({ tab, label, icon: Icon, count, color }) => (
+            <button key={tab} onClick={() => { setActiveTab(tab); setStatusFilter('All'); }}
+              className={`flex items-center gap-3 w-full px-4 py-2.5 rounded-2xl text-xs font-bold transition-all ${activeTab === tab ? 'bg-brand-orange/15 text-brand-orange' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}>
+              <Icon className={`h-4 w-4 ${activeTab === tab ? '' : color}`} />
+              {label} ({count})
+            </button>
+          ))}
         </aside>
 
-        {/* Dashboard Area */}
-        <main className="flex-grow p-6 md:p-8 flex flex-col gap-8 bg-brand-dark relative z-10 text-left">
-
+        {/* Main Content */}
+        <main className="flex-grow p-6 md:p-8 flex flex-col gap-6 bg-brand-dark text-left">
           {isLoading ? (
             <div className="flex-grow flex items-center justify-center">
               <svg className="animate-spin h-8 w-8 text-brand-orange" fill="none" viewBox="0 0 24 24">
@@ -258,538 +383,95 @@ export default function AdminDashboard() {
             </div>
           ) : (
             <>
-              {/* OVERVIEW TAB */}
+              {/* OVERVIEW */}
               {activeTab === 'overview' && (
-                <div className="space-y-8 animate-fadeIn">
-
-                  {/* Title Block */}
+                <div className="space-y-6">
                   <div>
-                    <h2 className="text-2xl font-extrabold font-display">Analytics Dashboard</h2>
-                    <p className="text-xs text-gray-400 mt-1">Real-time statistics of secure leads generated through landing forms.</p>
+                    <h2 className="text-2xl font-extrabold font-display">Analytics Overview</h2>
+                    <p className="text-xs text-gray-400 mt-1">Real-time lead metrics</p>
                   </div>
-
-                  {/* Summary Metric Cards */}
                   <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-
-                    <div className="bg-[#121212] border border-white/5 rounded-3xl p-5 flex flex-col justify-between hover:border-brand-orange/20 transition-all">
-                      <div className="flex justify-between items-center mb-3">
-                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Total Leads</span>
-                        <Users className="h-4.5 w-4.5 text-brand-orange" />
+                    {[
+                      { label: 'Total', count: totalLeads, icon: Users, color: 'text-brand-orange' },
+                      { label: 'Health', count: totalHealth, icon: Heart, color: 'text-red-500' },
+                      { label: 'Life', count: totalLife, icon: ShieldAlert, color: 'text-blue-500' },
+                      { label: 'General', count: totalGeneral, icon: Car, color: 'text-amber-500' },
+                      { label: 'Consult', count: totalConsultations, icon: CalendarRange, color: 'text-emerald-500' },
+                    ].map(({ label, count, icon: Icon, color }) => (
+                      <div key={label} className="bg-[#121212] border border-white/5 rounded-3xl p-5 hover:border-white/10 transition-all">
+                        <div className="flex justify-between items-center mb-3">
+                          <span className="text-[10px] font-black text-gray-400 uppercase">{label}</span>
+                          <Icon className={`h-4 w-4 ${color}`} />
+                        </div>
+                        <span className="text-3xl font-black font-display">{count}</span>
                       </div>
-                      <span className="text-3xl font-black font-display text-white">{totalLeads}</span>
-                    </div>
-
-                    <div className="bg-[#121212] border border-white/5 rounded-3xl p-5 flex flex-col justify-between hover:border-red-500/20 transition-all">
-                      <div className="flex justify-between items-center mb-3">
-                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Health</span>
-                        <Heart className="h-4.5 w-4.5 text-red-500" />
-                      </div>
-                      <span className="text-3xl font-black font-display text-white">{totalHealth}</span>
-                    </div>
-
-                    <div className="bg-[#121212] border border-white/5 rounded-3xl p-5 flex flex-col justify-between hover:border-blue-500/20 transition-all">
-                      <div className="flex justify-between items-center mb-3">
-                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Life</span>
-                        <ShieldAlert className="h-4.5 w-4.5 text-blue-500" />
-                      </div>
-                      <span className="text-3xl font-black font-display text-white">{totalLife}</span>
-                    </div>
-
-                    <div className="bg-[#121212] border border-white/5 rounded-3xl p-5 flex flex-col justify-between hover:border-amber-500/20 transition-all">
-                      <div className="flex justify-between items-center mb-3">
-                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">General</span>
-                        <Car className="h-4.5 w-4.5 text-amber-500" />
-                      </div>
-                      <span className="text-3xl font-black font-display text-white">{totalGeneral}</span>
-                    </div>
-
-                    <div className="bg-[#121212] border border-white/5 rounded-3xl p-5 flex flex-col justify-between hover:border-emerald-500/20 transition-all">
-                      <div className="flex justify-between items-center mb-3">
-                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Consultations</span>
-                        <CalendarRange className="h-4.5 w-4.5 text-emerald-500" />
-                      </div>
-                      <span className="text-3xl font-black font-display text-white">{totalConsultations}</span>
-                    </div>
-
+                    ))}
                   </div>
 
-                  {/* SVG Charts section */}
-                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-
-                    {/* Donut Chart (Breakdown) */}
-                    <div className="lg:col-span-5 bg-[#121212] border border-white/5 rounded-3xl p-6 flex flex-col items-center justify-between">
-                      <div className="w-full text-left mb-4">
-                        <h3 className="text-sm font-extrabold uppercase tracking-wider text-gray-300 font-display">Lead Breakdown</h3>
-                        <p className="text-[10px] text-gray-500">Percentage distribution of captured leads by product.</p>
-                      </div>
-
-                      {totalLeads > 0 ? (
-                        <div className="relative flex items-center justify-center h-48 w-48">
-                          {/* SVG Donut */}
-                          <svg className="w-full h-full transform -rotate-90" viewBox="0 0 42 42">
-                            <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#1d1d1d" strokeWidth="4" />
-                            {/* Health circle */}
-                            <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#ef4444" strokeWidth="4"
-                              strokeDasharray={`${(totalHealth / totalLeads) * 100} ${100 - (totalHealth / totalLeads) * 100}`}
-                              strokeDashoffset="0"
-                            />
-                            {/* Life circle */}
-                            <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#3b82f6" strokeWidth="4"
-                              strokeDasharray={`${(totalLife / totalLeads) * 100} ${100 - (totalLife / totalLeads) * 100}`}
-                              strokeDashoffset={-((totalHealth / totalLeads) * 100)}
-                            />
-                            {/* General circle */}
-                            <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#f59e0b" strokeWidth="4"
-                              strokeDasharray={`${(totalGeneral / totalLeads) * 100} ${100 - (totalGeneral / totalLeads) * 100}`}
-                              strokeDashoffset={-(((totalHealth + totalLife) / totalLeads) * 100)}
-                            />
-                            {/* Consultations circle */}
-                            <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#10b981" strokeWidth="4"
-                              strokeDasharray={`${(totalConsultations / totalLeads) * 100} ${100 - (totalConsultations / totalLeads) * 100}`}
-                              strokeDashoffset={-(((totalHealth + totalLife + totalGeneral) / totalLeads) * 100)}
-                            />
-                          </svg>
-                          <div className="absolute flex flex-col items-center justify-center">
-                            <span className="text-2xl font-black font-display">{totalLeads}</span>
-                            <span className="text-[9px] uppercase tracking-wider text-gray-400 font-bold">Total</span>
+                  {/* Status breakdown */}
+                  <div className="bg-[#121212] border border-white/5 rounded-3xl p-6">
+                    <h3 className="text-sm font-extrabold uppercase tracking-wider text-gray-300 mb-4">Status Distribution</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                      {['Pending', 'Processing', 'Converted', 'Rejected'].map(status => {
+                        const count = [...leads.health, ...leads.life, ...leads.general, ...leads.consultation].filter((l: any) => l.status === status).length;
+                        return (
+                          <div key={status} className="text-center p-4 rounded-2xl bg-white/5 border border-white/5">
+                            <StatusBadge status={status} />
+                            <p className="text-2xl font-black mt-2">{count}</p>
                           </div>
-                        </div>
-                      ) : (
-                        <div className="h-48 flex items-center justify-center text-xs text-gray-500 font-semibold">
-                          No data to plot charts
-                        </div>
-                      )}
-
-                      <div className="w-full grid grid-cols-2 gap-2 mt-6 text-xs font-semibold">
-                        <div className="flex items-center gap-2 text-gray-300">
-                          <span className="h-3 w-3 rounded bg-red-500 inline-block shrink-0" />
-                          <span>Health ({totalLeads > 0 ? Math.round((totalHealth / totalLeads) * 100) : 0}%)</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-gray-300">
-                          <span className="h-3 w-3 rounded bg-blue-500 inline-block shrink-0" />
-                          <span>Life ({totalLeads > 0 ? Math.round((totalLife / totalLeads) * 100) : 0}%)</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-gray-300">
-                          <span className="h-3 w-3 rounded bg-amber-500 inline-block shrink-0" />
-                          <span>General ({totalLeads > 0 ? Math.round((totalGeneral / totalLeads) * 100) : 0}%)</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-gray-300">
-                          <span className="h-3 w-3 rounded bg-emerald-500 inline-block shrink-0" />
-                          <span>Consult ({totalLeads > 0 ? Math.round((totalConsultations / totalLeads) * 100) : 0}%)</span>
-                        </div>
-                      </div>
+                        );
+                      })}
                     </div>
-
-                    {/* Bar Chart (Lead Volumes) */}
-                    <div className="lg:col-span-7 bg-[#121212] border border-white/5 rounded-3xl p-6 flex flex-col justify-between">
-                      <div className="w-full text-left mb-4">
-                        <h3 className="text-sm font-extrabold uppercase tracking-wider text-gray-300 font-display">Inquiry Volumes</h3>
-                        <p className="text-[10px] text-gray-500">Comparison of inquiries received across different products.</p>
-                      </div>
-
-                      {totalLeads > 0 ? (
-                        <div className="h-48 flex items-end justify-between px-6 pb-2 border-b border-white/10">
-                          {/* Health Bar */}
-                          <div className="flex flex-col items-center gap-2 w-16">
-                            <span className="text-xs font-bold text-red-400">{totalHealth}</span>
-                            <div
-                              className="w-8 bg-red-500 rounded-t-lg transition-all duration-1000"
-                              style={{ height: `${(totalHealth / Math.max(totalHealth, totalLife, totalGeneral, totalConsultations, 1)) * 110 + 10}px` }}
-                            />
-                            <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest mt-1">Health</span>
-                          </div>
-
-                          {/* Life Bar */}
-                          <div className="flex flex-col items-center gap-2 w-16">
-                            <span className="text-xs font-bold text-blue-400">{totalLife}</span>
-                            <div
-                              className="w-8 bg-blue-500 rounded-t-lg transition-all duration-1000"
-                              style={{ height: `${(totalLife / Math.max(totalHealth, totalLife, totalGeneral, totalConsultations, 1)) * 110 + 10}px` }}
-                            />
-                            <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest mt-1">Life</span>
-                          </div>
-
-                          {/* General Bar */}
-                          <div className="flex flex-col items-center gap-2 w-16">
-                            <span className="text-xs font-bold text-amber-400">{totalGeneral}</span>
-                            <div
-                              className="w-8 bg-amber-500 rounded-t-lg transition-all duration-1000"
-                              style={{ height: `${(totalGeneral / Math.max(totalHealth, totalLife, totalGeneral, totalConsultations, 1)) * 110 + 10}px` }}
-                            />
-                            <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest mt-1">General</span>
-                          </div>
-
-                          {/* Consultation Bar */}
-                          <div className="flex flex-col items-center gap-2 w-16">
-                            <span className="text-xs font-bold text-emerald-400">{totalConsultations}</span>
-                            <div
-                              className="w-8 bg-emerald-500 rounded-t-lg transition-all duration-1000"
-                              style={{ height: `${(totalConsultations / Math.max(totalHealth, totalLife, totalGeneral, totalConsultations, 1)) * 110 + 10}px` }}
-                            />
-                            <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest mt-1">Consult</span>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="h-48 flex items-center justify-center text-xs text-gray-500 font-semibold">
-                          No leads captured yet. Add some leads on public forms!
-                        </div>
-                      )}
-                    </div>
-
                   </div>
-
                 </div>
               )}
 
-              {/* LIST VIEWS (HEALTH, LIFE, GENERAL, CONSULTATION) */}
+              {/* LIST VIEWS */}
               {activeTab !== 'overview' && (
-                <div className="space-y-6 animate-fadeIn">
-
-                  {/* Section Title & Header */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-5">
+                  <div className="flex flex-col sm:flex-row justify-between gap-4">
                     <div>
-                      <h2 className="text-2xl font-extrabold font-display uppercase tracking-wide">
+                      <h2 className="text-xl font-extrabold font-display uppercase tracking-wide">
                         {activeTab === 'health' && 'Health Insurance Leads'}
                         {activeTab === 'life' && 'Life Insurance Leads'}
                         {activeTab === 'general' && 'General Insurance Leads'}
                         {activeTab === 'consultation' && 'Consultation Requests'}
                       </h2>
-                      <p className="text-xs text-gray-400 mt-1">
-                        Viewing{' '}
-                        {activeTab === 'health' && filteredHealth.length}
-                        {activeTab === 'life' && filteredLife.length}
-                        {activeTab === 'general' && filteredGeneral.length}
-                        {activeTab === 'consultation' && filteredConsultation.length}{' '}
-                        results
-                      </p>
+                      <p className="text-xs text-gray-400 mt-1">{getFilteredAndSorted(leads[activeTab]).length} results</p>
                     </div>
+                    <button onClick={() => exportToCSV(activeTab)} className="flex items-center gap-2 bg-brand-orange hover:opacity-90 text-xs font-bold rounded-full px-5 py-2.5 text-white active:scale-95 transition-all self-start">
+                      <Download className="h-4 w-4" /> Export CSV
+                    </button>
+                  </div>
 
-                    <div className="flex gap-3">
-                      <button
-                        onClick={() => exportToCSV(activeTab)}
-                        className="flex items-center gap-2 bg-brand-orange hover:opacity-95 text-xs font-bold rounded-full px-5 py-2.5 shadow-md active:scale-95 transition-all text-white"
-                      >
-                        <Download className="h-4 w-4" />
-                        Export CSV
-                      </button>
+                  {/* Filters Row */}
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-4 top-3 h-4 w-4 text-gray-500" />
+                      <input type="text" placeholder="Search by name, email, or phone..."
+                        value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full rounded-2xl border border-white/10 bg-white/5 py-2.5 pl-11 pr-4 text-xs text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-brand-orange" />
+                    </div>
+                    {/* Status Filter Pills */}
+                    <div className="flex gap-1.5 flex-wrap">
+                      {['All', 'Pending', 'Processing', 'Converted', 'Rejected'].map(s => (
+                        <button key={s} onClick={() => setStatusFilter(s)}
+                          className={`px-4 py-2.5 rounded-full text-[10px] font-bold border transition-all ${statusFilter === s ? 'bg-brand-orange/15 text-brand-orange border-brand-orange/30' : 'bg-white/5 text-gray-400 border-white/10 hover:text-white hover:border-white/20'}`}>
+                          {s}
+                        </button>
+                      ))}
                     </div>
                   </div>
 
-                  {/* Search bar controls */}
-                  <div className="relative">
-                    <Search className="absolute left-4 top-3.5 h-4.5 w-4.5 text-gray-500" />
-                    <input
-                      type="text"
-                      placeholder="Search leads by name, email, or contact number..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full rounded-2xl border border-white/10 bg-white/5 py-3 pl-11 pr-4 text-xs text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-brand-orange transition-all"
-                    />
-                  </div>
-
-                  {/* Data Tables */}
-                  <div className="overflow-hidden rounded-3xl bg-[#121212] border border-white/5 shadow-xl">
-
-                    {/* HEALTH LEADS TABLE */}
-                    {activeTab === 'health' && (
-                      <div className="overflow-x-auto">
-                        <table className="w-full border-collapse text-left text-xs">
-                          <thead>
-                            <tr className="border-b border-white/5 bg-white/2 bg-white/2 select-none font-bold uppercase text-gray-400">
-                              <th className="p-4 w-12" />
-                              <th className="p-4">Name</th>
-                              <th className="p-4">Contact</th>
-                              <th className="p-4">Email</th>
-                              <th className="p-4">State</th>
-                              <th className="p-4">Members</th>
-                              <th className="p-4">Created At</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {filteredHealth.length > 0 ? (
-                              filteredHealth.map((lead) => (
-                                <React.Fragment key={lead.id}>
-                                  <tr className="border-b border-white/5 hover:bg-white/2 transition-colors">
-                                    <td className="p-4 text-center">
-                                      <button
-                                        onClick={() => toggleRow(lead.id)}
-                                        className="p-1 rounded-full hover:bg-white/10 text-gray-400 hover:text-white"
-                                      >
-                                        {expandedRows[lead.id] ? <ChevronUp className="h-4.5 w-4.5" /> : <ChevronDown className="h-4.5 w-4.5" />}
-                                      </button>
-                                    </td>
-                                    <td className="p-4 font-bold text-white">{lead.name}</td>
-                                    <td className="p-4 font-semibold text-gray-300">{lead.contact}</td>
-                                    <td className="p-4 text-gray-300">{lead.email}</td>
-                                    <td className="p-4 text-gray-400">{lead.state}</td>
-                                    <td className="p-4">
-                                      <span className="bg-red-500/10 text-red-400 px-2.5 py-1 rounded-full font-extrabold text-[10px]">
-                                        {Array.isArray(lead.family_members) ? lead.family_members.length : 0} members
-                                      </span>
-                                    </td>
-                                    <td className="p-4 text-gray-450">{new Date(lead.created_at).toLocaleDateString()}</td>
-                                  </tr>
-
-                                  {/* Expanded details container */}
-                                  {expandedRows[lead.id] && (
-                                    <tr className="bg-white/1">
-                                      <td colSpan={7} className="p-6 border-b border-white/5">
-                                        <div className="space-y-4">
-                                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                                            <div>
-                                              <span className="font-bold text-gray-400 block uppercase text-[10px]">Address Details</span>
-                                              <p className="text-gray-200 mt-1 font-semibold">{lead.address || 'Not Provided'}, {lead.pincode}</p>
-                                            </div>
-                                            <div>
-                                              <span className="font-bold text-gray-400 block uppercase text-[10px]">Lead ID</span>
-                                              <p className="text-gray-400 mt-1 font-mono text-[10px]">{lead.id}</p>
-                                            </div>
-                                          </div>
-
-                                          {/* Family list */}
-                                          <div>
-                                            <span className="font-bold text-gray-400 block uppercase text-[10px] mb-2">Insured Family Members</span>
-                                            {Array.isArray(lead.family_members) && lead.family_members.length > 0 ? (
-                                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                                                {lead.family_members.map((member: any, mIdx: number) => (
-                                                  <div key={mIdx} className="bg-white/5 rounded-2xl p-3 border border-white/5 text-left text-xs">
-                                                    <span className="font-bold text-white block">{member.name}</span>
-                                                    <div className="flex justify-between text-[10px] text-gray-400 font-semibold mt-1">
-                                                      <span>Relation: {member.relation}</span>
-                                                      <span>DOB: {member.dob}</span>
-                                                    </div>
-                                                  </div>
-                                                ))}
-                                              </div>
-                                            ) : (
-                                              <p className="text-gray-500 text-xs italic">No family members specified</p>
-                                            )}
-                                          </div>
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  )}
-                                </React.Fragment>
-                              ))
-                            ) : (
-                              <tr>
-                                <td colSpan={7} className="p-12 text-center text-xs text-gray-500 italic">No leads match search query</td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-
-                    {/* LIFE LEADS TABLE */}
-                    {activeTab === 'life' && (
-                      <div className="overflow-x-auto">
-                        <table className="w-full border-collapse text-left text-xs">
-                          <thead>
-                            <tr className="border-b border-white/5 bg-white/2 select-none font-bold uppercase text-gray-400">
-                              <th className="p-4" />
-                              <th className="p-4">Name</th>
-                              <th className="p-4">Contact</th>
-                              <th className="p-4">Email</th>
-                              <th className="p-4">DOB</th>
-                              <th className="p-4">Profession</th>
-                              <th className="p-4">Income</th>
-                              <th className="p-4">Created At</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {filteredLife.length > 0 ? (
-                              filteredLife.map((lead) => (
-                                <React.Fragment key={lead.id}>
-                                  <tr className="border-b border-white/5 hover:bg-white/2 transition-colors">
-                                    <td className="p-4 text-center">
-                                      <button
-                                        onClick={() => toggleRow(lead.id)}
-                                        className="p-1 rounded-full hover:bg-white/10 text-gray-400 hover:text-white"
-                                      >
-                                        {expandedRows[lead.id] ? <ChevronUp className="h-4.5 w-4.5" /> : <ChevronDown className="h-4.5 w-4.5" />}
-                                      </button>
-                                    </td>
-                                    <td className="p-4 font-bold text-white">{lead.name}</td>
-                                    <td className="p-4 font-semibold text-gray-300">{lead.contact}</td>
-                                    <td className="p-4 text-gray-300">{lead.email}</td>
-                                    <td className="p-4 text-gray-450">{lead.dob}</td>
-                                    <td className="p-4 text-gray-350">{lead.profession}</td>
-                                    <td className="p-4">
-                                      <span className="bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full font-extrabold text-[10px]">
-                                        {lead.annual_income}
-                                      </span>
-                                    </td>
-                                    <td className="p-4 text-gray-450">{new Date(lead.created_at).toLocaleDateString()}</td>
-                                  </tr>
-                                  {expandedRows[lead.id] && (
-                                    <tr className="bg-white/1">
-                                      <td colSpan={8} className="p-6 border-b border-white/5 text-xs text-left">
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                          <div>
-                                            <span className="font-bold text-gray-400 block uppercase text-[10px]">Existing Policies</span>
-                                            <p className="text-gray-200 mt-1 font-semibold">{lead.existing_policies || 'None'}</p>
-                                          </div>
-                                          <div>
-                                            <span className="font-bold text-gray-400 block uppercase text-[10px]">Lead ID</span>
-                                            <p className="text-gray-400 mt-1 font-mono text-[10px]">{lead.id}</p>
-                                          </div>
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  )}
-                                </React.Fragment>
-                              ))
-                            ) : (
-                              <tr>
-                                <td colSpan={8} className="p-12 text-center text-xs text-gray-500 italic">No leads match search query</td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-
-                    {/* GENERAL LEADS TABLE */}
-                    {activeTab === 'general' && (
-                      <div className="overflow-x-auto">
-                        <table className="w-full border-collapse text-left text-xs">
-                          <thead>
-                            <tr className="border-b border-white/5 bg-white/2 select-none font-bold uppercase text-gray-400">
-                              <th className="p-4" />
-                              <th className="p-4">Name</th>
-                              <th className="p-4">Contact</th>
-                              <th className="p-4">Email</th>
-                              <th className="p-4">Insurance Requirement</th>
-                              <th className="p-4">State</th>
-                              <th className="p-4">Created At</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {filteredGeneral.length > 0 ? (
-                              filteredGeneral.map((lead) => (
-                                <React.Fragment key={lead.id}>
-                                  <tr className="border-b border-white/5 hover:bg-white/2 transition-colors">
-                                    <td className="p-4 text-center">
-                                      <button
-                                        onClick={() => toggleRow(lead.id)}
-                                        className="p-1 rounded-full hover:bg-white/10 text-gray-400 hover:text-white"
-                                      >
-                                        {expandedRows[lead.id] ? <ChevronUp className="h-4.5 w-4.5" /> : <ChevronDown className="h-4.5 w-4.5" />}
-                                      </button>
-                                    </td>
-                                    <td className="p-4 font-bold text-white">{lead.name}</td>
-                                    <td className="p-4 font-semibold text-gray-300">{lead.contact}</td>
-                                    <td className="p-4 text-gray-300">{lead.email}</td>
-                                    <td className="p-4">
-                                      <span className="bg-amber-500/10 text-amber-400 px-2.5 py-1 rounded-full font-extrabold text-[10px]">
-                                        {lead.insurance_type}
-                                      </span>
-                                    </td>
-                                    <td className="p-4 text-gray-350">{lead.state}</td>
-                                    <td className="p-4 text-gray-450">{new Date(lead.created_at).toLocaleDateString()}</td>
-                                  </tr>
-                                  {expandedRows[lead.id] && (
-                                    <tr className="bg-white/1">
-                                      <td colSpan={7} className="p-6 border-b border-white/5 text-xs text-left">
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                          <div>
-                                            <span className="font-bold text-gray-400 block uppercase text-[10px]">Residential Address</span>
-                                            <p className="text-gray-200 mt-1 font-semibold">{lead.address || 'Not Provided'}, {lead.pincode}</p>
-                                          </div>
-                                          <div>
-                                            <span className="font-bold text-gray-400 block uppercase text-[10px]">Lead ID</span>
-                                            <p className="text-gray-400 mt-1 font-mono text-[10px]">{lead.id}</p>
-                                          </div>
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  )}
-                                </React.Fragment>
-                              ))
-                            ) : (
-                              <tr>
-                                <td colSpan={7} className="p-12 text-center text-xs text-gray-500 italic">No leads match search query</td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-
-                    {/* CONSULTATION TABLE */}
-                    {activeTab === 'consultation' && (
-                      <div className="overflow-x-auto">
-                        <table className="w-full border-collapse text-left text-xs">
-                          <thead>
-                            <tr className="border-b border-white/5 bg-white/2 select-none font-bold uppercase text-gray-400">
-                              <th className="p-4" />
-                              <th className="p-4">Name</th>
-                              <th className="p-4">Contact Phone</th>
-                              <th className="p-4">Email</th>
-                              <th className="p-4">Preferred Date</th>
-                              <th className="p-4">Status</th>
-                              <th className="p-4">Created At</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {filteredConsultation.length > 0 ? (
-                              filteredConsultation.map((lead) => (
-                                <React.Fragment key={lead.id}>
-                                  <tr className="border-b border-white/5 hover:bg-white/2 transition-colors">
-                                    <td className="p-4 text-center">
-                                      <button
-                                        onClick={() => toggleRow(lead.id)}
-                                        className="p-1 rounded-full hover:bg-white/10 text-gray-400 hover:text-white"
-                                      >
-                                        {expandedRows[lead.id] ? <ChevronUp className="h-4.5 w-4.5" /> : <ChevronDown className="h-4.5 w-4.5" />}
-                                      </button>
-                                    </td>
-                                    <td className="p-4 font-bold text-white">{lead.name}</td>
-                                    <td className="p-4 font-semibold text-gray-300">{lead.phone}</td>
-                                    <td className="p-4 text-gray-300">{lead.email}</td>
-                                    <td className="p-4 text-gray-450">{lead.preferred_date}</td>
-                                    <td className="p-4">
-                                      <span className="bg-green-500/10 text-green-400 px-2.5 py-1 rounded-full font-extrabold text-[10px]">
-                                        {lead.status}
-                                      </span>
-                                    </td>
-                                    <td className="p-4 text-gray-450">{new Date(lead.created_at).toLocaleDateString()}</td>
-                                  </tr>
-                                  {expandedRows[lead.id] && (
-                                    <tr className="bg-white/1">
-                                      <td colSpan={7} className="p-6 border-b border-white/5 text-xs text-left">
-                                        <div className="space-y-2">
-                                          <div>
-                                            <span className="font-bold text-gray-400 block uppercase text-[10px]">Consultation Message</span>
-                                            <p className="text-gray-200 mt-1 font-semibold whitespace-pre-wrap leading-relaxed">{lead.message || 'No message provided.'}</p>
-                                          </div>
-                                          <div>
-                                            <span className="font-bold text-gray-400 block uppercase text-[10px]">Request ID</span>
-                                            <p className="text-gray-400 mt-1 font-mono text-[10px]">{lead.id}</p>
-                                          </div>
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  )}
-                                </React.Fragment>
-                              ))
-                            ) : (
-                              <tr>
-                                <td colSpan={7} className="p-12 text-center text-xs text-gray-500 italic">No leads match search query</td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-
-                  </div>
+                  {/* Data Table */}
+                  {activeTab === 'health' && <LeadTable type="health" columns={[{ key: 'name', label: 'Name' }, { key: 'contact', label: 'Phone' }, { key: 'email', label: 'Email' }, { key: 'state', label: 'State' }, { key: 'family_members', label: 'Members' }, { key: 'status', label: 'Status' }, { key: 'created_at', label: 'Date' }]} />}
+                  {activeTab === 'life' && <LeadTable type="life" columns={[{ key: 'name', label: 'Name' }, { key: 'contact', label: 'Phone' }, { key: 'email', label: 'Email' }, { key: 'profession', label: 'Profession' }, { key: 'annual_income', label: 'Income' }, { key: 'status', label: 'Status' }, { key: 'created_at', label: 'Date' }]} />}
+                  {activeTab === 'general' && <LeadTable type="general" columns={[{ key: 'name', label: 'Name' }, { key: 'contact', label: 'Phone' }, { key: 'email', label: 'Email' }, { key: 'insurance_type', label: 'Type' }, { key: 'state', label: 'State' }, { key: 'status', label: 'Status' }, { key: 'created_at', label: 'Date' }]} />}
+                  {activeTab === 'consultation' && <LeadTable type="consultation" columns={[{ key: 'name', label: 'Name' }, { key: 'email', label: 'Email' }, { key: 'phone', label: 'Phone' }, { key: 'preferred_date', label: 'Pref. Date' }, { key: 'status', label: 'Status' }, { key: 'created_at', label: 'Date' }]} />}
                 </div>
               )}
             </>
           )}
-
         </main>
       </div>
     </div>

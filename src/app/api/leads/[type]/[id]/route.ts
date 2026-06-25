@@ -111,9 +111,7 @@ export async function PUT(
 
   // Validate status if provided
   if (updateData.status) {
-    const validLeadStatuses = ['New', 'Contacted', 'Follow-Up', 'Converted', 'Rejected'];
-    const validConsultationStatuses = ['Pending', 'Scheduled', 'Completed', 'Cancelled'];
-    const validStatuses = type === 'consultation' ? validConsultationStatuses : validLeadStatuses;
+    const validStatuses = ['Pending', 'Processing', 'Converted', 'Rejected'];
     if (!validStatuses.includes(updateData.status)) {
       return NextResponse.json({ error: `Invalid status. Must be: ${validStatuses.join(', ')}` }, { status: 400 });
     }
