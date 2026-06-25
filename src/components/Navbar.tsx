@@ -57,13 +57,6 @@ export default function Navbar({ onOpenConsultation }: NavbarProps) {
                 {link.name}
               </a>
             ))}
-            {/* Admin link helper */}
-            <a
-              href="/admin"
-              className="text-xs font-semibold text-gray-400 hover:text-gray-200 transition-colors border border-gray-700 px-2 py-1 rounded"
-            >
-              Admin
-            </a>
           </div>
 
           {/* Action Button */}
@@ -109,13 +102,6 @@ export default function Navbar({ onOpenConsultation }: NavbarProps) {
               </a>
             ))}
             <div className="border-t border-white/10 my-4 pt-4 flex flex-col gap-4">
-              <a
-                href="/admin"
-                onClick={() => setIsMobileMenuOpen(false)}
-                className="block text-center rounded-md px-3 py-2 text-sm text-gray-400 border border-white/10 hover:bg-white/5 hover:text-white"
-              >
-                Admin Panel
-              </a>
               <button
                 onClick={() => {
                   setIsMobileMenuOpen(false);
