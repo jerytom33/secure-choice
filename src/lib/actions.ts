@@ -111,7 +111,7 @@ export async function loginAdmin(passcode: string): Promise<ActionResult> {
   let adminPass = process.env.ADMIN_PASSCODE;
   if (!adminPass) {
     console.warn('ADMIN_PASSCODE not set. Using default insecure passcode for dev.');
-    adminPass = 'securechoice2026';
+    adminPass = 'securechoice@2026';
   }
 
   if (passcode === adminPass) {
