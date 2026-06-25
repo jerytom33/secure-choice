@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { ShieldCheck, CheckCircle2 } from 'lucide-react';
-import { submitLifeLead, loginAdmin, checkAdminSession } from '@/lib/actions';
+import { submitLifeLead } from '@/lib/actions';
 
 export default function LifeForm() {
   const [formData, setFormData] = useState({
